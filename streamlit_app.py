@@ -645,4 +645,8 @@ st.markdown("""
 <div style="text-align:center; color:#94a3b8; font-size:0.82em; padding-bottom:16px;">
     🩺 Klasifikasi Kanker Payudara &nbsp;|&nbsp;
     Dibuat dengan ❤️ menggunakan <b>Streamlit</b> & <b>TensorFlow</b> &nbsp;|&nbsp;
-    Dataset: Wisconsin Breast Cancer &nbsp;
+    Dataset: Wisconsin Breast Cancer &nbsp;|&nbsp;
+    <a href="https://huggingface.co/spaces/kyy080505/KlasifikasiKangkerPayudara"
+       style="color:#6366f1; text-decoration:none;">🤗 HuggingFace Space</a>
+</div>
+""", unsafe_allow_html=True)
