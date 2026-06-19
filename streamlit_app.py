@@ -1,7 +1,7 @@
 """
 ============================================================
 APLIKASI KLASIFIKASI KANKER PAYUDARA — STREAMLIT VERSION
-Framework: Streamlit (Lokal / Alternatif)
+Framework: Streamlit (Cloud Optimized)
 Model: SVM, Random Forest, ANN (Deep Learning)
 Dataset: Wisconsin Breast Cancer Dataset
 Jalankan: streamlit run streamlit_app.py
@@ -10,12 +10,7 @@ Jalankan: streamlit run streamlit_app.py
 
 import os
 import sys
-
-# Tambahkan path Disk D agar Python bisa membaca package yang diinstal di sana
-custom_path = r"D:\python_packages"
-if os.path.exists(custom_path) and custom_path not in sys.path:
-    sys.path.insert(0, custom_path)
-
+import urllib.request
 import warnings
 import pickle
 import numpy as np
@@ -25,6 +20,7 @@ import joblib
 import plotly.graph_objects as go
 import plotly.express as px
 import h5py
+import tensorflow as tf
 
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -162,6 +158,9 @@ section[data-testid="stSidebar"] .stNumberInput input {
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 
+# Buat folder models jika belum ada
+os.makedirs(MODELS_DIR, exist_ok=True)
+
 SAMPLE_MALIGNANT = [
     17.99, 10.38, 122.80, 1001.0, 0.11840, 0.27760, 0.30010, 0.14710, 0.24190, 0.07871,
     1.0950, 0.9053, 8.5890, 153.40, 0.006399, 0.049040, 0.053730, 0.015870, 0.030030, 0.006193,
@@ -218,53 +217,20 @@ FEATURE_GROUPS = {
 }
 
 # ============================================================
-# NUMPY ANN (fallback tanpa TensorFlow)
+# FUNGSI DOWNLOAD MODEL DARI URL (jika file tidak ada)
 # ============================================================
-class NumpyANN:
-    def __init__(self, h5_path):
-        self.weights = {}
-        with h5py.File(h5_path, 'r') as f:
-            w = f['model_weights']
-            self.weights['d1_k'] = w['dense']['sequential']['dense']['kernel'][:]
-            self.weights['d1_b'] = w['dense']['sequential']['dense']['bias'][:]
-            self.weights['bn1_gamma'] = w['batch_normalization']['sequential']['batch_normalization']['gamma'][:]
-            self.weights['bn1_beta'] = w['batch_normalization']['sequential']['batch_normalization']['beta'][:]
-            self.weights['bn1_mm'] = w['batch_normalization']['sequential']['batch_normalization']['moving_mean'][:]
-            self.weights['bn1_mv'] = w['batch_normalization']['sequential']['batch_normalization']['moving_variance'][:]
-            
-            self.weights['d2_k'] = w['dense_1']['sequential']['dense_1']['kernel'][:]
-            self.weights['d2_b'] = w['dense_1']['sequential']['dense_1']['bias'][:]
-            self.weights['bn2_gamma'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['gamma'][:]
-            self.weights['bn2_beta'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['beta'][:]
-            self.weights['bn2_mm'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['moving_mean'][:]
-            self.weights['bn2_mv'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['moving_variance'][:]
-            
-            self.weights['d3_k'] = w['dense_2']['sequential']['dense_2']['kernel'][:]
-            self.weights['d3_b'] = w['dense_2']['sequential']['dense_2']['bias'][:]
-            self.weights['bn3_gamma'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['gamma'][:]
-            self.weights['bn3_beta'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['beta'][:]
-            self.weights['bn3_mm'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['moving_mean'][:]
-            self.weights['bn3_mv'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['moving_variance'][:]
-            
-            self.weights['d4_k'] = w['dense_3']['sequential']['dense_3']['kernel'][:]
-            self.weights['d4_b'] = w['dense_3']['sequential']['dense_3']['bias'][:]
-
-    def predict(self, x, verbose=0):
-        x = np.dot(x, self.weights['d1_k']) + self.weights['d1_b']
-        x = np.maximum(0, x)
-        x = self.weights['bn1_gamma'] * (x - self.weights['bn1_mm']) / np.sqrt(self.weights['bn1_mv'] + 1e-3) + self.weights['bn1_beta']
-        
-        x = np.dot(x, self.weights['d2_k']) + self.weights['d2_b']
-        x = np.maximum(0, x)
-        x = self.weights['bn2_gamma'] * (x - self.weights['bn2_mm']) / np.sqrt(self.weights['bn2_mv'] + 1e-3) + self.weights['bn2_beta']
-        
-        x = np.dot(x, self.weights['d3_k']) + self.weights['d3_b']
-        x = np.maximum(0, x)
-        x = self.weights['bn3_gamma'] * (x - self.weights['bn3_mm']) / np.sqrt(self.weights['bn3_mv'] + 1e-3) + self.weights['bn3_beta']
-        
-        x = np.dot(x, self.weights['d4_k']) + self.weights['d4_b']
-        x = 1 / (1 + np.exp(-x))
-        return np.array([x])
+def download_file(url, local_path):
+    """Download file dari URL ke local_path jika belum ada"""
+    if os.path.exists(local_path):
+        return True
+    try:
+        st.info(f"⏳ Mengunduh {os.path.basename(local_path)}...")
+        urllib.request.urlretrieve(url, local_path)
+        st.success(f"✅ {os.path.basename(local_path)} berhasil diunduh")
+        return True
+    except Exception as e:
+        st.warning(f"⚠️ Gagal mengunduh {os.path.basename(local_path)}: {e}")
+        return False
 
 # ============================================================
 # LOAD MODELS (cached)
@@ -276,21 +242,43 @@ def load_models():
         "scaler": None, "feature_names": None,
         "ann_available": False,
     }
+    
+    # URL model (ganti dengan URL raw GitHub Tuan)
+    # Contoh: https://raw.githubusercontent.com/username/repo/branch/models/svm_model.pkl
+    BASE_URL = "https://raw.githubusercontent.com/0507muhamadrizky-web/KlasifikasiKanker/main/models/"
+    
+    # Download model files jika belum ada
+    model_files = {
+        "svm_model.pkl": BASE_URL + "svm_model.pkl",
+        "rf_model.pkl": BASE_URL + "rf_model.pkl",
+        "scaler.pkl": BASE_URL + "scaler.pkl",
+        "feature_names.pkl": BASE_URL + "feature_names.pkl",
+        "ann_model.h5": BASE_URL + "ann_model.h5",
+    }
+    
+    for filename, url in model_files.items():
+        local_path = os.path.join(MODELS_DIR, filename)
+        download_file(url, local_path)
+    
+    # Load SVM
     try:
         result["svm"] = joblib.load(os.path.join(MODELS_DIR, "svm_model.pkl"))
     except Exception as e:
         st.sidebar.warning(f"SVM: {e}")
-
+    
+    # Load RF
     try:
         result["rf"] = joblib.load(os.path.join(MODELS_DIR, "rf_model.pkl"))
     except Exception as e:
         st.sidebar.warning(f"RF: {e}")
-
+    
+    # Load Scaler
     try:
         result["scaler"] = joblib.load(os.path.join(MODELS_DIR, "scaler.pkl"))
     except Exception as e:
         st.sidebar.warning(f"Scaler: {e}")
-
+    
+    # Load Feature Names
     try:
         with open(os.path.join(MODELS_DIR, "feature_names.pkl"), "rb") as f:
             result["feature_names"] = pickle.load(f)
@@ -304,16 +292,69 @@ def load_models():
             "perimeter_worst", "area_worst", "smoothness_worst", "compactness_worst",
             "concavity_worst", "concave points_worst", "symmetry_worst", "fractal_dimension_worst",
         ]
-
-    # ANN — hanya pakai NumpyANN (tanpa TensorFlow)
+    
+    # Load ANN dengan TensorFlow
     ann_path = os.path.join(MODELS_DIR, "ann_model.h5")
     if os.path.exists(ann_path):
         try:
-            result["ann"] = NumpyANN(ann_path)
+            result["ann"] = tf.keras.models.load_model(ann_path)
             result["ann_available"] = True
         except Exception as e:
-            st.sidebar.warning(f"ANN load error: {e}")
+            st.sidebar.warning(f"ANN (TF): {e}")
+            # Fallback ke NumpyANN jika TensorFlow gagal
+            try:
+                import h5py
+                class NumpyANN:
+                    def __init__(self, h5_path):
+                        self.weights = {}
+                        with h5py.File(h5_path, 'r') as f:
+                            w = f['model_weights']
+                            self.weights['d1_k'] = w['dense']['sequential']['dense']['kernel'][:]
+                            self.weights['d1_b'] = w['dense']['sequential']['dense']['bias'][:]
+                            self.weights['bn1_gamma'] = w['batch_normalization']['sequential']['batch_normalization']['gamma'][:]
+                            self.weights['bn1_beta'] = w['batch_normalization']['sequential']['batch_normalization']['beta'][:]
+                            self.weights['bn1_mm'] = w['batch_normalization']['sequential']['batch_normalization']['moving_mean'][:]
+                            self.weights['bn1_mv'] = w['batch_normalization']['sequential']['batch_normalization']['moving_variance'][:]
+                            
+                            self.weights['d2_k'] = w['dense_1']['sequential']['dense_1']['kernel'][:]
+                            self.weights['d2_b'] = w['dense_1']['sequential']['dense_1']['bias'][:]
+                            self.weights['bn2_gamma'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['gamma'][:]
+                            self.weights['bn2_beta'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['beta'][:]
+                            self.weights['bn2_mm'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['moving_mean'][:]
+                            self.weights['bn2_mv'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['moving_variance'][:]
+                            
+                            self.weights['d3_k'] = w['dense_2']['sequential']['dense_2']['kernel'][:]
+                            self.weights['d3_b'] = w['dense_2']['sequential']['dense_2']['bias'][:]
+                            self.weights['bn3_gamma'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['gamma'][:]
+                            self.weights['bn3_beta'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['beta'][:]
+                            self.weights['bn3_mm'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['moving_mean'][:]
+                            self.weights['bn3_mv'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['moving_variance'][:]
+                            
+                            self.weights['d4_k'] = w['dense_3']['sequential']['dense_3']['kernel'][:]
+                            self.weights['d4_b'] = w['dense_3']['sequential']['dense_3']['bias'][:]
 
+                    def predict(self, x, verbose=0):
+                        x = np.dot(x, self.weights['d1_k']) + self.weights['d1_b']
+                        x = np.maximum(0, x)
+                        x = self.weights['bn1_gamma'] * (x - self.weights['bn1_mm']) / np.sqrt(self.weights['bn1_mv'] + 1e-3) + self.weights['bn1_beta']
+                        
+                        x = np.dot(x, self.weights['d2_k']) + self.weights['d2_b']
+                        x = np.maximum(0, x)
+                        x = self.weights['bn2_gamma'] * (x - self.weights['bn2_mm']) / np.sqrt(self.weights['bn2_mv'] + 1e-3) + self.weights['bn2_beta']
+                        
+                        x = np.dot(x, self.weights['d3_k']) + self.weights['d3_b']
+                        x = np.maximum(0, x)
+                        x = self.weights['bn3_gamma'] * (x - self.weights['bn3_mm']) / np.sqrt(self.weights['bn3_mv'] + 1e-3) + self.weights['bn3_beta']
+                        
+                        x = np.dot(x, self.weights['d4_k']) + self.weights['d4_b']
+                        x = 1 / (1 + np.exp(-x))
+                        return np.array([x])
+                
+                result["ann"] = NumpyANN(ann_path)
+                result["ann_available"] = True
+            except Exception as e2:
+                st.sidebar.warning(f"ANN (Numpy): {e2}")
+    
     return result
 
 models = load_models()
@@ -503,13 +544,6 @@ if predict_clicked:
             </div>
             """, unsafe_allow_html=True)
 
-    # ── ANN not available notice ─────────────────────────────────
-    if not models["ann_available"]:
-        st.info(
-            "🧠 **ANN (Deep Learning)** belum tersedia. "
-            "Jalankan kode Google Colab (`app.md`) untuk training ANN, lalu upload `ann_model.h5` ke folder `models/`"
-        )
-
     # ── Plotly: Confidence Bar Chart ────────────────────────────
     if results:
         st.markdown("### 📈 Visualisasi Confidence Score")
@@ -554,7 +588,6 @@ if predict_clicked:
 
         # Gauge chart — Malignant probability dari model terbaik
         with chart_col2:
-            # Pakai rata-rata malignant probability
             avg_malignant = np.mean([results[m]["malignant_pct"] for m in results])
 
             fig_gauge = go.Figure(go.Indicator(
