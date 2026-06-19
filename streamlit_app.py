@@ -24,6 +24,7 @@ import streamlit as st
 import joblib
 import plotly.graph_objects as go
 import plotly.express as px
+import h5py
 
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -217,6 +218,55 @@ FEATURE_GROUPS = {
 }
 
 # ============================================================
+# NUMPY ANN (fallback tanpa TensorFlow)
+# ============================================================
+class NumpyANN:
+    def __init__(self, h5_path):
+        self.weights = {}
+        with h5py.File(h5_path, 'r') as f:
+            w = f['model_weights']
+            self.weights['d1_k'] = w['dense']['sequential']['dense']['kernel'][:]
+            self.weights['d1_b'] = w['dense']['sequential']['dense']['bias'][:]
+            self.weights['bn1_gamma'] = w['batch_normalization']['sequential']['batch_normalization']['gamma'][:]
+            self.weights['bn1_beta'] = w['batch_normalization']['sequential']['batch_normalization']['beta'][:]
+            self.weights['bn1_mm'] = w['batch_normalization']['sequential']['batch_normalization']['moving_mean'][:]
+            self.weights['bn1_mv'] = w['batch_normalization']['sequential']['batch_normalization']['moving_variance'][:]
+            
+            self.weights['d2_k'] = w['dense_1']['sequential']['dense_1']['kernel'][:]
+            self.weights['d2_b'] = w['dense_1']['sequential']['dense_1']['bias'][:]
+            self.weights['bn2_gamma'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['gamma'][:]
+            self.weights['bn2_beta'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['beta'][:]
+            self.weights['bn2_mm'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['moving_mean'][:]
+            self.weights['bn2_mv'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['moving_variance'][:]
+            
+            self.weights['d3_k'] = w['dense_2']['sequential']['dense_2']['kernel'][:]
+            self.weights['d3_b'] = w['dense_2']['sequential']['dense_2']['bias'][:]
+            self.weights['bn3_gamma'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['gamma'][:]
+            self.weights['bn3_beta'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['beta'][:]
+            self.weights['bn3_mm'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['moving_mean'][:]
+            self.weights['bn3_mv'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['moving_variance'][:]
+            
+            self.weights['d4_k'] = w['dense_3']['sequential']['dense_3']['kernel'][:]
+            self.weights['d4_b'] = w['dense_3']['sequential']['dense_3']['bias'][:]
+
+    def predict(self, x, verbose=0):
+        x = np.dot(x, self.weights['d1_k']) + self.weights['d1_b']
+        x = np.maximum(0, x)
+        x = self.weights['bn1_gamma'] * (x - self.weights['bn1_mm']) / np.sqrt(self.weights['bn1_mv'] + 1e-3) + self.weights['bn1_beta']
+        
+        x = np.dot(x, self.weights['d2_k']) + self.weights['d2_b']
+        x = np.maximum(0, x)
+        x = self.weights['bn2_gamma'] * (x - self.weights['bn2_mm']) / np.sqrt(self.weights['bn2_mv'] + 1e-3) + self.weights['bn2_beta']
+        
+        x = np.dot(x, self.weights['d3_k']) + self.weights['d3_b']
+        x = np.maximum(0, x)
+        x = self.weights['bn3_gamma'] * (x - self.weights['bn3_mm']) / np.sqrt(self.weights['bn3_mv'] + 1e-3) + self.weights['bn3_beta']
+        
+        x = np.dot(x, self.weights['d4_k']) + self.weights['d4_b']
+        x = 1 / (1 + np.exp(-x))
+        return np.array([x])
+
+# ============================================================
 # LOAD MODELS (cached)
 # ============================================================
 @st.cache_resource(show_spinner="⏳ Memuat model ML...")
@@ -255,73 +305,14 @@ def load_models():
             "concavity_worst", "concave points_worst", "symmetry_worst", "fractal_dimension_worst",
         ]
 
-    try:
-        import tensorflow as tf
-        tf.get_logger().setLevel("ERROR")
-        ann_paths = [
-            os.path.join(MODELS_DIR, "ann_model.h5"),
-            os.path.join(MODELS_DIR, "ann_model.keras"),
-        ]
-        for ann_path in ann_paths:
-            if os.path.exists(ann_path):
-                result["ann"] = tf.keras.models.load_model(ann_path)
-                result["ann_available"] = True
-                break
-    except Exception as e:
+    # ANN — hanya pakai NumpyANN (tanpa TensorFlow)
+    ann_path = os.path.join(MODELS_DIR, "ann_model.h5")
+    if os.path.exists(ann_path):
         try:
-            import h5py
-            class NumpyANN:
-                def __init__(self, h5_path):
-                    self.weights = {}
-                    with h5py.File(h5_path, 'r') as f:
-                        w = f['model_weights']
-                        self.weights['d1_k'] = w['dense']['sequential']['dense']['kernel'][:]
-                        self.weights['d1_b'] = w['dense']['sequential']['dense']['bias'][:]
-                        self.weights['bn1_gamma'] = w['batch_normalization']['sequential']['batch_normalization']['gamma'][:]
-                        self.weights['bn1_beta'] = w['batch_normalization']['sequential']['batch_normalization']['beta'][:]
-                        self.weights['bn1_mm'] = w['batch_normalization']['sequential']['batch_normalization']['moving_mean'][:]
-                        self.weights['bn1_mv'] = w['batch_normalization']['sequential']['batch_normalization']['moving_variance'][:]
-                        
-                        self.weights['d2_k'] = w['dense_1']['sequential']['dense_1']['kernel'][:]
-                        self.weights['d2_b'] = w['dense_1']['sequential']['dense_1']['bias'][:]
-                        self.weights['bn2_gamma'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['gamma'][:]
-                        self.weights['bn2_beta'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['beta'][:]
-                        self.weights['bn2_mm'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['moving_mean'][:]
-                        self.weights['bn2_mv'] = w['batch_normalization_1']['sequential']['batch_normalization_1']['moving_variance'][:]
-                        
-                        self.weights['d3_k'] = w['dense_2']['sequential']['dense_2']['kernel'][:]
-                        self.weights['d3_b'] = w['dense_2']['sequential']['dense_2']['bias'][:]
-                        self.weights['bn3_gamma'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['gamma'][:]
-                        self.weights['bn3_beta'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['beta'][:]
-                        self.weights['bn3_mm'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['moving_mean'][:]
-                        self.weights['bn3_mv'] = w['batch_normalization_2']['sequential']['batch_normalization_2']['moving_variance'][:]
-                        
-                        self.weights['d4_k'] = w['dense_3']['sequential']['dense_3']['kernel'][:]
-                        self.weights['d4_b'] = w['dense_3']['sequential']['dense_3']['bias'][:]
-
-                def predict(self, x, verbose=0):
-                    x = np.dot(x, self.weights['d1_k']) + self.weights['d1_b']
-                    x = np.maximum(0, x)
-                    x = self.weights['bn1_gamma'] * (x - self.weights['bn1_mm']) / np.sqrt(self.weights['bn1_mv'] + 1e-3) + self.weights['bn1_beta']
-                    
-                    x = np.dot(x, self.weights['d2_k']) + self.weights['d2_b']
-                    x = np.maximum(0, x)
-                    x = self.weights['bn2_gamma'] * (x - self.weights['bn2_mm']) / np.sqrt(self.weights['bn2_mv'] + 1e-3) + self.weights['bn2_beta']
-                    
-                    x = np.dot(x, self.weights['d3_k']) + self.weights['d3_b']
-                    x = np.maximum(0, x)
-                    x = self.weights['bn3_gamma'] * (x - self.weights['bn3_mm']) / np.sqrt(self.weights['bn3_mv'] + 1e-3) + self.weights['bn3_beta']
-                    
-                    x = np.dot(x, self.weights['d4_k']) + self.weights['d4_b']
-                    x = 1 / (1 + np.exp(-x))
-                    return np.array([x])
-                    
-            ann_path = os.path.join(MODELS_DIR, "ann_model.h5")
-            if os.path.exists(ann_path):
-                result["ann"] = NumpyANN(ann_path)
-                result["ann_available"] = True
-        except:
-            pass
+            result["ann"] = NumpyANN(ann_path)
+            result["ann_available"] = True
+        except Exception as e:
+            st.sidebar.warning(f"ANN load error: {e}")
 
     return result
 
@@ -654,8 +645,4 @@ st.markdown("""
 <div style="text-align:center; color:#94a3b8; font-size:0.82em; padding-bottom:16px;">
     🩺 Klasifikasi Kanker Payudara &nbsp;|&nbsp;
     Dibuat dengan ❤️ menggunakan <b>Streamlit</b> & <b>TensorFlow</b> &nbsp;|&nbsp;
-    Dataset: Wisconsin Breast Cancer &nbsp;|&nbsp;
-    <a href="https://huggingface.co/spaces/kyy080505/KlasifikasiKangkerPayudara"
-       style="color:#6366f1; text-decoration:none;">🤗 HuggingFace Space</a>
-</div>
-""", unsafe_allow_html=True)
+    Dataset: Wisconsin Breast Cancer &nbsp;
